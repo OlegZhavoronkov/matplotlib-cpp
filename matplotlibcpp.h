@@ -40,8 +40,37 @@
 #endif
 
 
-namespace matplotlibcpp {
-namespace detail {
+//just trust me,dont touch this
+#define CAT_MACROSES_MPLCPP(x,y) CAT_MACROSES_MPLCPP_(x,y)
+#define CAT_MACROSES_MPLCPP_(x,y) x##y
+
+namespace matplotlibcpp
+{
+namespace internal
+{
+
+template <typename T> class ScopeGuardObjectInternal
+{
+	T lambda;
+public:
+	ScopeGuardObjectInternal(T&& lambda ) : lambda( std::move( lambda ) ) {}
+
+	ScopeGuardObjectInternal( const ScopeGuardObjectInternal& ) = delete;
+	ScopeGuardObjectInternal& operator=( const ScopeGuardObjectInternal& ) = delete;
+
+	~ScopeGuardObjectInternal() 
+	{
+        [[maybe_unused]]volatile void* p=lambda();
+         //p;
+		//lambda();
+	}
+};
+
+}
+
+#define FINALLY_MPLCPP(...) volatile auto CAT_MACROSES_MPLCPP(__scopeGuard__ ,__COUNTER__ ) = ::matplotlibcpp::internal::ScopeGuardObjectInternal([&]()->volatile void*{ __VA_ARGS__ return (volatile void*)(nullptr);})
+namespace detail
+{
 
 static std::string s_backend;
 
@@ -2577,7 +2606,23 @@ inline void close()
     Py_DECREF(res);
 }
 
-inline void xkcd() {
+inline void close(long fig_id)
+{
+    detail::_interpreter::get();
+    PyObject *fig_args = PyTuple_New(1);
+  
+    PyTuple_SetItem(fig_args, 0, PyLong_FromLong(fig_id));
+    PyObject* res = PyObject_CallObject(
+            detail::_interpreter::get().s_python_function_close,
+            fig_args);
+
+    if (!res) throw std::runtime_error("Call to close() failed.");
+
+    Py_DECREF(res);
+}
+
+inline void xkcd( )
+{
     detail::_interpreter::get();
 
     PyObject* res;
@@ -2911,8 +2956,15 @@ public:
         PyObject* res = PyObject_Call(detail::_interpreter::get().s_python_function_plot, plot_args, kwargs);
 
         Py_DECREF(kwargs);
-        Py_DECREF(plot_args);
-
+        Py_DECREF( plot_args );
+        bool succeded = false;
+        FINALLY_MPLCPP(
+            if (!succeded)
+            {
+                decref( );
+            }
+            
+        );
         if(res)
         {
             line= PyList_GetItem(res, 0);
@@ -2920,9 +2972,13 @@ public:
             if(line)
                 set_data_fct = PyObject_GetAttrString(line,"set_data");
             else
-                Py_DECREF(line);
-            Py_DECREF(res);
+                Py_DECREF( line );
+            _plot_figure = PyObject_GetAttrString( line , "figure" );
+            _plot_figure_canvas = PyObject_GetAttrString( _plot_figure , "canvas" );
+            _pFnDrawidle=PyObject_GetAttrString(_plot_figure_canvas,"draw_idle");
+            Py_DECREF( res );
         }
+        succeded = true;
     }
 
     // shorter initialization with name or format only
@@ -2948,7 +3004,12 @@ public:
         }
         return false;
     }
-
+    void draw()
+    {
+        PyObject* plot_args = PyTuple_New(0);
+        PyObject* res = PyObject_CallObject( _pFnDrawidle , plot_args );
+        if (res) Py_DECREF(res);
+    }
     // clears the plot but keep it available
     bool clear() {
         return update(std::vector<double>(), std::vector<double>());
@@ -2971,16 +3032,30 @@ public:
     }
 private:
 
-    void decref() {
-        if(line)
-            Py_DECREF(line);
-        if(set_data_fct)
-            Py_DECREF(set_data_fct);
+    void decref( )
+    {
+        for (PyObject*& pobject : { 
+                    std::ref( line                ),  
+                    std::ref( set_data_fct        ),  
+                    std::ref( _plot_figure        ),  
+                    std::ref( _plot_figure_canvas ),
+                    std::ref( _pFnDrawidle        )
+                     })
+        {
+            if (pobject != nullptr)
+            {
+                Py_DECREF( pobject );
+                pobject = nullptr;
+            }
+        }
     }
 
 
     PyObject* line = nullptr;
     PyObject* set_data_fct = nullptr;
+    PyObject* _plot_figure = nullptr;
+    PyObject* _plot_figure_canvas = nullptr;
+    PyObject* _pFnDrawidle = nullptr;
 };
 
 } // end namespace matplotlibcpp
