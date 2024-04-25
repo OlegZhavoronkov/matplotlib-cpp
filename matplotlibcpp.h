@@ -66,9 +66,31 @@ public:
 	}
 };
 
+
+
+template<typename...T> void Py_DECREF_m( T&...args )
+{
+    auto deleter = [ & ] ( PyObject*& ref )
+                    {
+                        if (ref != nullptr)
+                        {
+                            Py_DECREF( ref );
+                            ref = nullptr;
+                        }
+
+                    };
+    std::apply( [ & ] ( auto&... pp ) {( ... , deleter( pp ) ); } , std::forward_as_tuple( args... ) );
+}
+
+inline bool check_assert( bool expression )
+{
+    return expression;
+}
+
 }
 
 #define FINALLY_MPLCPP(...) volatile auto CAT_MACROSES_MPLCPP(__scopeGuard__ ,__COUNTER__ ) = ::matplotlibcpp::internal::ScopeGuardObjectInternal([&]()->volatile void*{ __VA_ARGS__ return (volatile void*)(nullptr);})
+#define ASSERT_MPLCPP(x) if(!internal::check_assert(x)){ throw std::runtime_error(std::string("assertion failed: ")+std::string(#x)); }
 namespace detail
 {
 
@@ -2967,13 +2989,14 @@ public:
         );
         if(res)
         {
-            line= PyList_GetItem(res, 0);
+            _line= PyList_GetItem(res, 0);
 
-            if(line)
-                set_data_fct = PyObject_GetAttrString(line,"set_data");
+            if(_line)
+                _set_data_fct = PyObject_GetAttrString(_line,"set_data");
             else
-                Py_DECREF( line );
-            _plot_figure = PyObject_GetAttrString( line , "figure" );
+                Py_DECREF( _line );
+            _plot_figure = PyObject_GetAttrString( _line , "figure" );
+            _plot_Axes = PyObject_GetAttrString( _line , "axes" );
             _plot_figure_canvas = PyObject_GetAttrString( _plot_figure , "canvas" );
             _pFnDrawidle=PyObject_GetAttrString(_plot_figure_canvas,"draw_idle");
             Py_DECREF( res );
@@ -2989,7 +3012,7 @@ public:
     template<typename Numeric>
     bool update(const std::vector<Numeric>& x, const std::vector<Numeric>& y) {
         assert(x.size() == y.size());
-        if(set_data_fct)
+        if(_set_data_fct)
         {
             PyObject* xarray = detail::get_array(x);
             PyObject* yarray = detail::get_array(y);
@@ -2998,7 +3021,7 @@ public:
             PyTuple_SetItem(plot_args, 0, xarray);
             PyTuple_SetItem(plot_args, 1, yarray);
 
-            PyObject* res = PyObject_CallObject(set_data_fct, plot_args);
+            PyObject* res = PyObject_CallObject(_set_data_fct, plot_args);
             if (res) Py_DECREF(res);
             return res;
         }
@@ -3017,9 +3040,9 @@ public:
 
     // definitely remove this line
     void remove() {
-        if(line)
+        if(_line)
         {
-            auto remove_fct = PyObject_GetAttrString(line,"remove");
+            auto remove_fct = PyObject_GetAttrString(_line,"remove");
             PyObject* args = PyTuple_New(0);
             PyObject* res = PyObject_CallObject(remove_fct, args);
             if (res) Py_DECREF(res);
@@ -3027,7 +3050,108 @@ public:
         decref();
     }
 
-    ~Plot() {
+    template< typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> >
+    set_ylim( const std::pair<T,T>& lim )
+    {
+        auto set_y_lim = PyObject_GetAttrString( _plot_Axes , "set_ylim" );
+        if (set_y_lim != nullptr)
+        {
+            PyObject* list = PyList_New(2);
+            PyList_SetItem(list, 0, PyFloat_FromDouble(lim.first));
+            PyList_SetItem(list, 1, PyFloat_FromDouble(lim.second));
+
+            PyObject* args = PyTuple_New(1);
+            PyTuple_SetItem(args, 0, list);
+            PyObject* res = PyObject_CallObject( set_y_lim , args );
+            //PyObject* res = PyObject_CallObject(detail::_interpreter::get().s_python_function_ylim, args);
+            if(!res) throw std::runtime_error("Call to ylim() failed.");
+            Py_DECREF(args);
+            Py_DECREF( res );
+            Py_DECREF(set_y_lim);
+        }
+    }
+
+    template< typename T>
+    std::enable_if_t<std::is_arithmetic_v<T> >
+    set_xlim( const std::pair<T,T>& lim )
+    {
+        auto set_x_lim = PyObject_GetAttrString( _plot_Axes , "set_xlim" );
+        if (set_x_lim != nullptr)
+        {
+            PyObject* list = PyList_New(2);
+            PyList_SetItem(list, 0, PyFloat_FromDouble(lim.first));
+            PyList_SetItem(list, 1, PyFloat_FromDouble(lim.second));
+
+            PyObject* args = PyTuple_New(1);
+            PyTuple_SetItem(args, 0, list);
+            PyObject* res = PyObject_CallObject( set_x_lim , args );
+            //PyObject* res = PyObject_CallObject(detail::_interpreter::get().s_python_function_ylim, args);
+            if(!res) throw std::runtime_error("Call to xlim() failed.");
+            Py_DECREF(args);
+            Py_DECREF( res );
+            Py_DECREF(set_x_lim);
+        }
+    }
+
+    /*relim
+       Parameters
+        ----------
+        visible_only : bool, default: False
+            Whether to exclude invisible artists.
+    */
+    void axes_relim( bool visible_only = false )
+    {
+        PyObject* axes_relim;
+        if (( axes_relim = PyObject_GetAttrString( _plot_Axes , "relim" ) ) != nullptr)
+        {
+            PyObject* args = PyTuple_New( 1 );
+            PyTuple_SetItem( args , 0 , ( visible_only ) ? Py_True : Py_False );
+            PyObject* res = PyObject_CallObject( axes_relim , args );
+            internal::Py_DECREF_m( args , res , axes_relim );
+            return;
+        }
+        ASSERT_MPLCPP( axes_relim != nullptr );
+        //throw std::runtime_error( "axes_relim==nullptr" )
+    }
+    
+    /*autoscale_view tight : bool or None
+            If *True*, only expand the axis limits using the margins.  Note
+            that unlike for `autoscale`, ``tight=True`` does *not* set the
+            margins to zero.
+
+            If *False* and :rc:`axes.autolimit_mode` is 'round_numbers', then
+            after expansion by the margins, further expand the axis limits
+            using the axis major locator.
+
+            If None (the default), reuse the value set in the previous call to
+            `autoscale_view` (the initial value is False, but the default style
+            sets :rc:`axes.autolimit_mode` to 'data', in which case this
+            behaves like True).
+
+        scalex : bool, default: True
+            Whether to autoscale the x axis.
+
+        scaley : bool, default: True
+            Whether to autoscale the y axis.*/
+    void axes_autoscale_view( bool Tight = false , bool scalex = true , bool scaley = true )
+    {
+        PyObject* axes_autoscale_view;
+        if (( axes_autoscale_view = PyObject_GetAttrString( _plot_Axes , "autoscale_view" ) ) != nullptr)
+        {
+            PyObject* args = PyTuple_New( 3 );
+            PyTuple_SetItem( args , 0 , ( Tight ) ? Py_True : Py_False );
+            PyTuple_SetItem( args , 1 , ( scalex ) ? Py_True : Py_False );
+            PyTuple_SetItem( args , 2 , ( scaley ) ? Py_True : Py_False );
+            PyObject* res = PyObject_CallObject( axes_autoscale_view , args );
+            internal::Py_DECREF_m( args , res , axes_autoscale_view );
+            return;
+        }
+        ASSERT_MPLCPP( axes_autoscale_view != nullptr );
+    }
+
+    ~Plot( )
+    {
         decref();
     }
 private:
@@ -3035,9 +3159,10 @@ private:
     void decref( )
     {
         for (PyObject*& pobject : { 
-                    std::ref( line                ),  
-                    std::ref( set_data_fct        ),  
-                    std::ref( _plot_figure        ),  
+                    std::ref( _line                ),  
+                    std::ref( _set_data_fct ),
+                    std::ref( _plot_Axes ),
+                    std::ref( _plot_figure ),
                     std::ref( _plot_figure_canvas ),
                     std::ref( _pFnDrawidle        )
                      })
@@ -3051,11 +3176,12 @@ private:
     }
 
 
-    PyObject* line = nullptr;
-    PyObject* set_data_fct = nullptr;
+    PyObject* _line = nullptr;
+    PyObject* _set_data_fct = nullptr;
     PyObject* _plot_figure = nullptr;
     PyObject* _plot_figure_canvas = nullptr;
     PyObject* _pFnDrawidle = nullptr;
+    PyObject* _plot_Axes = nullptr;
 };
 
 } // end namespace matplotlibcpp
