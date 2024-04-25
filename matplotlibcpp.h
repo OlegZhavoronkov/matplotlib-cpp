@@ -336,7 +336,7 @@ private:
     }
 
     ~_interpreter() {
-        Py_Finalize();
+        //Py_Finalize();
     }
 };
 
@@ -2998,7 +2998,8 @@ public:
             _plot_figure = PyObject_GetAttrString( _line , "figure" );
             _plot_Axes = PyObject_GetAttrString( _line , "axes" );
             _plot_figure_canvas = PyObject_GetAttrString( _plot_figure , "canvas" );
-            _pFnDrawidle=PyObject_GetAttrString(_plot_figure_canvas,"draw_idle");
+            _pFnDrawidle = PyObject_GetAttrString( _plot_figure_canvas , "draw_idle" );
+            _pFnFlushEvents = PyObject_GetAttrString(_plot_figure_canvas , "flush_events" );
             Py_DECREF( res );
         }
         succeded = true;
@@ -3064,11 +3065,10 @@ public:
             PyObject* args = PyTuple_New(1);
             PyTuple_SetItem(args, 0, list);
             PyObject* res = PyObject_CallObject( set_y_lim , args );
-            //PyObject* res = PyObject_CallObject(detail::_interpreter::get().s_python_function_ylim, args);
-            if(!res) throw std::runtime_error("Call to ylim() failed.");
-            Py_DECREF(args);
-            Py_DECREF( res );
-            Py_DECREF(set_y_lim);
+            FINALLY_MPLCPP(
+                internal::Py_DECREF_m( args , res , set_y_lim );
+            );
+            if (!res) throw std::runtime_error( "Call to ylim() failed." );
         }
     }
 
@@ -3086,11 +3086,10 @@ public:
             PyObject* args = PyTuple_New(1);
             PyTuple_SetItem(args, 0, list);
             PyObject* res = PyObject_CallObject( set_x_lim , args );
-            //PyObject* res = PyObject_CallObject(detail::_interpreter::get().s_python_function_ylim, args);
+            FINALLY_MPLCPP(
+                internal::Py_DECREF_m( args , res , set_x_lim );
+            );
             if(!res) throw std::runtime_error("Call to xlim() failed.");
-            Py_DECREF(args);
-            Py_DECREF( res );
-            Py_DECREF(set_x_lim);
         }
     }
 
@@ -3144,10 +3143,31 @@ public:
             PyTuple_SetItem( args , 1 , ( scalex ) ? Py_True : Py_False );
             PyTuple_SetItem( args , 2 , ( scaley ) ? Py_True : Py_False );
             PyObject* res = PyObject_CallObject( axes_autoscale_view , args );
-            internal::Py_DECREF_m( args , res , axes_autoscale_view );
+            internal::Py_DECREF_m( /*args ,*/ res , axes_autoscale_view );
             return;
         }
         ASSERT_MPLCPP( axes_autoscale_view != nullptr );
+    }
+
+    template<typename ChronoType , typename Per>
+    std::enable_if_t    <
+        std::is_void_v      <
+            std::void_t         <
+                decltype( 
+                    std::chrono::duration_cast< std::chrono::duration<double , std::chrono::seconds::period> >(
+                        std::declval<
+                            std::chrono::duration<ChronoType,Per>
+                                    >()
+                            )
+                        )    
+                                >
+                            >
+                        >
+    pump_messages( const std::chrono::duration<ChronoType , Per>& duration )
+    {
+        PyObject* res = PyObject_CallObject( _pFnFlushEvents , detail::_interpreter::get( ).s_python_empty_tuple );
+        //pause( std::chrono::duration_cast< std::chrono::duration<double , std::chrono::seconds::period> >( duration ).count( ) );
+        internal::Py_DECREF_m( res );
     }
 
     ~Plot( )
@@ -3158,21 +3178,30 @@ private:
 
     void decref( )
     {
-        for (PyObject*& pobject : { 
-                    std::ref( _line                ),  
-                    std::ref( _set_data_fct ),
-                    std::ref( _plot_Axes ),
-                    std::ref( _plot_figure ),
-                    std::ref( _plot_figure_canvas ),
-                    std::ref( _pFnDrawidle        )
-                     })
-        {
-            if (pobject != nullptr)
-            {
-                Py_DECREF( pobject );
-                pobject = nullptr;
-            }
-        }
+        internal::Py_DECREF_m(
+                        _line 
+                        ,_set_data_fct 
+                        ,_plot_figure 
+                        ,_plot_figure_canvas 
+                        ,_pFnDrawidle 
+                        ,_plot_Axes 
+                        ,_pFnFlushEvents 
+        );
+        //for (PyObject*& pobject : {
+        //            std::ref( _line                ),  
+        //            std::ref( _set_data_fct ),
+        //            std::ref( _plot_Axes ),
+        //            std::ref( _plot_figure ),
+        //            std::ref( _plot_figure_canvas ),
+        //            std::ref( _pFnDrawidle        )
+        //             })
+        //{
+        //    if (pobject != nullptr)
+        //    {
+        //        Py_DECREF( pobject );
+        //        pobject = nullptr;
+        //    }
+        //}
     }
 
 
@@ -3182,6 +3211,7 @@ private:
     PyObject* _plot_figure_canvas = nullptr;
     PyObject* _pFnDrawidle = nullptr;
     PyObject* _plot_Axes = nullptr;
+    PyObject* _pFnFlushEvents = nullptr;
 };
 
 } // end namespace matplotlibcpp
