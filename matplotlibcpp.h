@@ -3473,6 +3473,23 @@ public:
         ASSERT_MPLCPP( it != _childAxises.end( ) );
         return _childAxises[ subplotName ].update( x , y );
     }
+
+    SubAxis& Subplot(const std::string& subplotName)
+    {
+        if (_childAxises.contains( subplotName ))
+        {
+            //auto it = _childAxises.find( subplotName );
+            return _childAxises[subplotName];
+        }
+        _childAxises.insert( {
+                    subplotName,
+                    SubAxis(    subplotName ,
+                                CreateLinePlot( subplotName  )
+                            )
+                } );
+        return _childAxises[ subplotName ];
+    }
+
 private:
     PyObject* CreateLinePlot(const std::string& subplotName)
     {
