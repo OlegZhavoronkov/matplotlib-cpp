@@ -154,7 +154,7 @@ struct _interpreter {
     PyObject *s_python_function_subplots_adjust;
     PyObject *s_python_function_rcparams;
     PyObject *s_python_function_spy;
-
+    PyObject *s_python_Line2d_ctor;
     /* For now, _interpreter is implemented as a singleton since its currently not possible to have
        multiple independent embedded python interpreters without patching the python source code
        or starting a separate process for each. [1]
@@ -328,7 +328,9 @@ private:
         s_python_function_colorbar = PyObject_GetAttrString(pymod, "colorbar");
         s_python_function_subplots_adjust = safe_import(pymod,"subplots_adjust");
         s_python_function_rcparams = PyObject_GetAttrString(pymod, "rcParams");
-	s_python_function_spy = PyObject_GetAttrString(pymod, "spy");
+        s_python_function_spy = PyObject_GetAttrString( pymod , "spy" );
+        s_python_Line2d_ctor = PyObject_GetAttrString( pymod , "Line2D" );
+        ASSERT_MPLCPP( s_python_Line2d_ctor != nullptr );
 #ifndef WITHOUT_NUMPY
         s_python_function_imshow = safe_import(pymod, "imshow");
 #endif
@@ -341,6 +343,96 @@ private:
 };
 
 } // end namespace detail
+
+
+enum class MarkerStyle
+{
+    None            ,
+    Star            ,     //  '*': 'star',                       
+    Plus            ,     //  '+': 'plus',                       
+    Point           ,     //  '.': 'point',                       
+    Tri_down        ,     //  '1': 'tri_down',                       
+    Tri_up          ,     //  '2': 'tri_up',                       
+    Tri_left        ,     //  '3': 'tri_left',                       
+    Tri_right       ,     //  '4': 'tri_right',                       
+    Octagon         ,     //  '8': 'octagon',                       
+    Hexagon2        ,     //  'H': 'hexagon2',                       
+    Hexagon1        ,     //  'h': 'hexagon1',                       
+    Pentagon        ,     //  'p': 'pentagon',                       
+    Plus_filled     ,     //  'P': 'plus_filled',                       
+    X               ,     //  'x': 'x',                       
+    X_filled        ,     //  'X': 'x_filled',                       
+    Diamond         ,     //  'D': 'diamond',                       
+    Thin_diamond    ,     //  'd': 'thin_diamond',                       
+    Circle          ,     //  'o': 'circle',                       
+    Square          ,     //  's': 'square',                       
+    Triangle_left   ,     //  '<': 'triangle_left',                       
+    Triangle_right  ,     //  '>': 'triangle_right',                       
+    Triangle_down   ,     //  'v': 'triangle_down',                       
+    Triangle_up     ,     //  '^': 'triangle_up',                       
+};
+
+enum class  LineStyle
+{
+    /*
+    '-'     : '_draw_solid' ,
+    '--'    : '_draw_dashed' ,
+    '-.'    : '_draw_dash_dot' ,
+    ':'     : '_draw_dotted' ,
+    'None'  : '_draw_nothing' ,
+    ' '     : '_draw_nothing' ,
+    ''      : '_draw_nothing'
+    */
+    None        ,  //' '     
+    Solid       ,  //'-'     : '_draw_solid' , 
+    Dashed      ,  //'--'    : '_draw_dashed' , 
+    DashDot     ,  //'-.'    : '_draw_dash_dot' , 
+    Dotted         //':'     : '_draw_dotted' , 
+};
+
+namespace
+{
+
+static const std::map<MarkerStyle , std::string> MarkerStyle2PythonMap =
+{
+    {MarkerStyle::None            ,       " "},//  None
+    {MarkerStyle::Star            ,       "*"},//: 'star',                       
+    {MarkerStyle::Plus            ,       "+"},//: 'plus',                       
+    {MarkerStyle::Point           ,       "."},//: 'point',                       
+    {MarkerStyle::Tri_down        ,       "1"},//: 'tri_down',                       
+    {MarkerStyle::Tri_up          ,       "2"},//: 'tri_up',                       
+    {MarkerStyle::Tri_left        ,       "3"},//: 'tri_left',                       
+    {MarkerStyle::Tri_right       ,       "4"},//: 'tri_right',                       
+    {MarkerStyle::Octagon         ,       "8"},//: 'octagon',                       
+    {MarkerStyle::Hexagon2        ,       "H"},//: 'hexagon2',                       
+    {MarkerStyle::Hexagon1        ,       "h"},//: 'hexagon1',                       
+    {MarkerStyle::Pentagon        ,       "p"},//: 'pentagon',                       
+    {MarkerStyle::Plus_filled     ,       "P"},//: 'plus_filled',                       
+    {MarkerStyle::X               ,       "x"},//: 'x',                       
+    {MarkerStyle::X_filled        ,       "X"},//: 'x_filled',                       
+    {MarkerStyle::Diamond         ,       "D"},//: 'diamond',                       
+    {MarkerStyle::Thin_diamond    ,       "d"},//: 'thin_diamond',                       
+    {MarkerStyle::Circle          ,       "o"},//: 'circle',                       
+    {MarkerStyle::Square          ,       "s"},//: 'square',                       
+    {MarkerStyle::Triangle_left   ,       "<"},//: 'triangle_left',                       
+    {MarkerStyle::Triangle_right  ,       ">"},//: 'triangle_right',                       
+    {MarkerStyle::Triangle_down   ,       "v"},//: 'triangle_down',                       
+    {MarkerStyle::Triangle_up     ,       "^"} //: 'triangle_up',                       
+
+};
+
+static const std::map<LineStyle , std::string> LineStyle2PythonMap =
+{
+    {        LineStyle::None        ,  " "  }, 
+    {        LineStyle::Solid       ,  "-"  }, 
+    {        LineStyle::Dashed      ,  "--" }, 
+    {        LineStyle::DashDot     ,  "-." }, 
+    {        LineStyle::Dotted      ,  ":"  }  
+};
+
+}
+
+
 
 /// Select the backend
 ///
@@ -2948,16 +3040,117 @@ inline bool plot(const std::vector<double>& x, const std::vector<double>& y, con
     return plot<double>(x,y,keywords);
 }
 
+class Plot;
+
+class SubAxis
+{
+public:
+    friend class Plot;
+    SubAxis( )
+        :   _line( nullptr ) ,
+            _set_data_fct( nullptr ) 
+    { }
+    SubAxis( const SubAxis& ) = delete;
+    SubAxis& operator=( const SubAxis& ) = delete;
+    SubAxis( SubAxis&& other )
+        :   _axisKey(std::move(other._axisKey)),
+            _line( other._line ) ,
+            _set_data_fct( other._set_data_fct )
+    {
+        other._line = nullptr;
+        other._set_data_fct = nullptr;
+    }
+    SubAxis& operator=( SubAxis&& other)
+    {
+        std::swap( other._axisKey , _axisKey );
+        std::swap( other._line , _line );
+        std::swap( other._set_data_fct , _set_data_fct );
+        return *this;
+    }
+protected:
+    SubAxis( const std::string& axisKey , PyObject* pLine )
+        :   _axisKey( axisKey ) ,
+            _line( pLine ) ,
+            _set_data_fct ( pLine != nullptr ?
+                                PyObject_GetAttrString( pLine , "set_data" )
+                                : nullptr )
+    {
+        ASSERT_MPLCPP( _line != nullptr );
+        ASSERT_MPLCPP( _set_data_fct != nullptr );
+    }
+public:
+    //SubAxis( const std::string& axisKey , PyObject* existingFigure , PyObject* existingLine );
+
+    ~SubAxis( )
+    {
+        decref( );
+    }
+
+    template<typename Numeric>
+    bool update( const std::vector<Numeric>& x , const std::vector<Numeric>& y )
+    {
+        assert( x.size( ) == y.size( ) );
+        if(_set_data_fct)
+        {
+            PyObject* xarray = detail::get_array(x);
+            PyObject* yarray = detail::get_array(y);
+
+            PyObject* plot_args = PyTuple_New(2);
+            PyTuple_SetItem(plot_args, 0, xarray);
+            PyTuple_SetItem(plot_args, 1, yarray);
+
+            PyObject* res = PyObject_CallObject(_set_data_fct, plot_args);
+            if (res) Py_DECREF(res);
+            return res;
+        }
+        return false;
+    }
+
+    bool clear( )
+    {
+        return update( std::vector<double>( ) , std::vector<double>( ) );
+    }
+    
+    void remove( )
+    {
+        if(_line)
+        {
+            auto remove_fct = PyObject_GetAttrString(_line,"remove");
+            PyObject* args = PyTuple_New(0);
+            PyObject* res = PyObject_CallObject(remove_fct, args);
+            if (res) Py_DECREF(res);
+        }
+        decref();
+    }
+private:
+    void decref( )
+    {
+        internal::Py_DECREF_m(
+                        _line 
+                        ,_set_data_fct 
+        );
+    }
+    std::string _axisKey;
+    PyObject* _line = nullptr;
+    PyObject* _set_data_fct = nullptr;
+};
+
+//class Plot;
+
+
 /*
  * This class allows dynamic plots, ie changing the plotted data without clearing and re-plotting
  */
 class Plot
 {
 public:
+    
     // default initialization with plot label, some data and format
     template<typename Numeric>
-    Plot(const std::string& name, const std::vector<Numeric>& x, const std::vector<Numeric>& y, const std::string& format = "") {
-        detail::_interpreter::get();
+    Plot( const std::string& name , const std::vector<Numeric>& x , const std::vector<Numeric>& y , const std::string& format = "" )
+        : _figureName(name)
+    {
+        detail::_interpreter::get( );
 
         assert(x.size() == y.size());
 
@@ -2975,32 +3168,51 @@ public:
         PyTuple_SetItem(plot_args, 1, yarray);
         PyTuple_SetItem(plot_args, 2, pystring);
 
-        PyObject* res = PyObject_Call(detail::_interpreter::get().s_python_function_plot, plot_args, kwargs);
-
-        Py_DECREF(kwargs);
+        //PyObject* res = PyObject_Call(detail::_interpreter::get().s_python_function_figure , plot_args, kwargs);
+        //[[maybe_unused]]
+        //long newFigid = figure( );
+        
+        PyObject *args = PyTuple_New(1);
+        PyTuple_SetItem(args, 0, PyString_FromString(name.c_str()));
+        _plot_figure = PyObject_CallObject(detail::_interpreter::get().s_python_function_figure, args);
+        Py_DECREF(args);
+        
+        Py_DECREF( kwargs );
         Py_DECREF( plot_args );
         bool succeded = false;
+        PyObject* paxis_fn = nullptr;
+        PyObject* subplotArgs = nullptr;
         FINALLY_MPLCPP(
+            internal::Py_DECREF_m( paxis_fn,subplotArgs );
             if (!succeded)
             {
                 decref( );
             }
             
         );
-        if(res)
+        ASSERT_MPLCPP( _plot_figure != nullptr );
+        paxis_fn = PyObject_GetAttrString( _plot_figure , "add_subplot" );
+        subplotArgs = PyTuple_New( 3 );
+        PyTuple_SetItem( subplotArgs , 0 , PyInt_FromLong( 1 ) );
+        PyTuple_SetItem( subplotArgs , 1 , PyInt_FromLong( 1 ) );
+        PyTuple_SetItem( subplotArgs , 2 , PyInt_FromLong( 1 ) );
+        _plot_Axes = PyObject_CallObject( paxis_fn , subplotArgs );
+        ASSERT_MPLCPP( _plot_Axes != nullptr );
+        if (_plot_figure)
         {
-            _line= PyList_GetItem(res, 0);
+            
+            ASSERT_MPLCPP( (_plot_figure_canvas = PyObject_GetAttrString( _plot_figure , "canvas" )) != nullptr );
+            ASSERT_MPLCPP( (_pFnDrawidle = PyObject_GetAttrString( _plot_figure_canvas , "draw_idle" ))!=nullptr );
+            ASSERT_MPLCPP( (_pFnFlushEvents = PyObject_GetAttrString( _plot_figure_canvas , "flush_events" )) != nullptr );
+            ASSERT_MPLCPP( ( _pFn_grid = PyObject_GetAttrString( _plot_Axes , "grid" ) ) != nullptr );
+            ASSERT_MPLCPP( ( _pFn_set_aspect = PyObject_GetAttrString( _plot_Axes , "set_aspect" ) ) != nullptr );
+            _childAxises.insert( {
+                                    name,
+                                    SubAxis(    name ,
+                                                CreateLinePlot( name+ "_subplot"  )
+                                            )
+                                } );
 
-            if(_line)
-                _set_data_fct = PyObject_GetAttrString(_line,"set_data");
-            else
-                Py_DECREF( _line );
-            _plot_figure = PyObject_GetAttrString( _line , "figure" );
-            _plot_Axes = PyObject_GetAttrString( _line , "axes" );
-            _plot_figure_canvas = PyObject_GetAttrString( _plot_figure , "canvas" );
-            _pFnDrawidle = PyObject_GetAttrString( _plot_figure_canvas , "draw_idle" );
-            _pFnFlushEvents = PyObject_GetAttrString(_plot_figure_canvas , "flush_events" );
-            Py_DECREF( res );
         }
         succeded = true;
     }
@@ -3010,45 +3222,43 @@ public:
     Plot(const std::string& name = "", const std::string& format = "")
         : Plot(name, std::vector<double>(), std::vector<double>(), format) {}
 
-    template<typename Numeric>
-    bool update(const std::vector<Numeric>& x, const std::vector<Numeric>& y) {
-        assert(x.size() == y.size());
-        if(_set_data_fct)
-        {
-            PyObject* xarray = detail::get_array(x);
-            PyObject* yarray = detail::get_array(y);
 
-            PyObject* plot_args = PyTuple_New(2);
-            PyTuple_SetItem(plot_args, 0, xarray);
-            PyTuple_SetItem(plot_args, 1, yarray);
-
-            PyObject* res = PyObject_CallObject(_set_data_fct, plot_args);
-            if (res) Py_DECREF(res);
-            return res;
-        }
-        return false;
-    }
     void draw()
     {
-        PyObject* plot_args = PyTuple_New(0);
-        PyObject* res = PyObject_CallObject( _pFnDrawidle , plot_args );
+        //PyObject* plot_args = PyTuple_New(0);
+        PyObject* res = PyObject_CallObject( _pFnDrawidle , detail::_interpreter::get( ).s_python_empty_tuple );
         if (res) Py_DECREF(res);
     }
     // clears the plot but keep it available
-    bool clear() {
-        return update(std::vector<double>(), std::vector<double>());
+    bool clear( )
+    {
+        bool res = true;
+        for (auto& [keyname , subplot] : _childAxises)
+        {
+            res = res && subplot.clear( );
+        }
+        return res;
+    }
+
+    bool clear(const std::string& keyname )
+    {
+        if (_childAxises.contains( keyname ))
+        {
+            return _childAxises[ keyname ].clear( );
+        }
+        return false;
     }
 
     // definitely remove this line
-    void remove() {
-        if(_line)
+    void remove( const std::string& keyName )
+    {
+        auto it = _childAxises.find( keyName );
+        if (it != _childAxises.begin())
         {
-            auto remove_fct = PyObject_GetAttrString(_line,"remove");
-            PyObject* args = PyTuple_New(0);
-            PyObject* res = PyObject_CallObject(remove_fct, args);
-            if (res) Py_DECREF(res);
+            it->second.remove( );
+            _childAxises.erase( it );
         }
-        decref();
+        //decref();
     }
 
     template< typename T>
@@ -3149,6 +3359,15 @@ public:
         ASSERT_MPLCPP( axes_autoscale_view != nullptr );
     }
 
+    void aspect (double aspect )
+    {
+
+    }
+    void grid   ( LineStyle ls )
+    {
+        
+    }
+
     template<typename ChronoType , typename Per>
     std::enable_if_t    <
         std::is_void_v      <
@@ -3174,44 +3393,76 @@ public:
     {
         decref();
     }
+
+    template<typename Numeric>
+    bool update( const std::vector<Numeric>& x , const std::vector<Numeric>& y, const std::string& subplotName={} )
+    {
+        if (subplotName.empty( ))
+        {
+            return _childAxises[ _figureName ].update( x , y );
+        }
+        auto it = _childAxises.find( subplotName );
+        ASSERT_MPLCPP( it != _childAxises.end( ) );
+        return _childAxises[ subplotName ].update( x , y );
+    }
 private:
+    PyObject* CreateLinePlot(const std::string& subplotName)
+    {
+        PyObject* kwargs = PyDict_New();
+        
+
+        PyObject* xarray = detail::get_array(std::vector<double>({1}));
+        PyObject* yarray = detail::get_array(std::vector<double>({1}));
+        
+        //PyObject* pystring = PyString_FromString(subplotName.c_str());
+
+        PyObject* plot_args = PyTuple_New(2);
+        PyTuple_SetItem(plot_args, 0, xarray);
+        PyTuple_SetItem(plot_args, 1, yarray);
+        //PyTuple_SetItem( plot_args , 2 , pystring );
+        PyObject* pLine = PyObject_Call( detail::_interpreter::get( ).s_python_Line2d_ctor , plot_args , nullptr );// PyInstanceMethod_New()
+        //auto* paxis_fn = PyObject_GetAttrString( _plot_Axes , "plot" ); add_line
+        auto* paxis_fn = PyObject_GetAttrString( _plot_Axes , "add_line" );
+        ASSERT_MPLCPP( paxis_fn != nullptr );
+        PyObject* add_line_args = PyTuple_New( 1 );
+        PyTuple_SetItem( add_line_args , 0 , pLine );
+        /*PyObject* res*/ pLine= PyObject_CallObject( paxis_fn , add_line_args );// ( paxis_fn , /*detail::_interpreter::get().s_python_empty_tuple*/ plot_args , kwargs );
+        //auto* pLine = PyList_GetItem( res , 0 );
+        ASSERT_MPLCPP( pLine != nullptr );
+        internal::Py_DECREF_m( plot_args , kwargs , paxis_fn /*, res*/ );
+        return pLine;
+    }
 
     void decref( )
     {
         internal::Py_DECREF_m(
-                        _line 
+                    /*  _line 
                         ,_set_data_fct 
-                        ,_plot_figure 
+                        ,*/_plot_figure 
                         ,_plot_figure_canvas 
                         ,_pFnDrawidle 
                         ,_plot_Axes 
-                        ,_pFnFlushEvents 
+                        , _pFnFlushEvents
+                        , _pFn_grid
+                        , _pFn_set_aspect
         );
-        //for (PyObject*& pobject : {
-        //            std::ref( _line                ),  
-        //            std::ref( _set_data_fct ),
-        //            std::ref( _plot_Axes ),
-        //            std::ref( _plot_figure ),
-        //            std::ref( _plot_figure_canvas ),
-        //            std::ref( _pFnDrawidle        )
-        //             })
-        //{
-        //    if (pobject != nullptr)
-        //    {
-        //        Py_DECREF( pobject );
-        //        pobject = nullptr;
-        //    }
-        //}
     }
 
 
-    PyObject* _line = nullptr;
-    PyObject* _set_data_fct = nullptr;
+//    PyObject* _line = nullptr;
+//    PyObject* _set_data_fct = nullptr;
     PyObject* _plot_figure = nullptr;
     PyObject* _plot_figure_canvas = nullptr;
     PyObject* _pFnDrawidle = nullptr;
     PyObject* _plot_Axes = nullptr;
     PyObject* _pFnFlushEvents = nullptr;
+    PyObject* _pFn_grid = nullptr;
+    PyObject* _pFn_set_aspect = nullptr;
+    std::string _figureName;
+    std::map<std::string , SubAxis> _childAxises;
 };
+
+
+
 
 } // end namespace matplotlibcpp
