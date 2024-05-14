@@ -3144,29 +3144,72 @@ private:
 class Plot
 {
 public:
+    Plot( )
+        :   _plot_figure        ( nullptr ) ,
+            _plot_figure_canvas ( nullptr ),
+            _pFnDrawidle        ( nullptr ),
+            _plot_Axes          ( nullptr ),
+            _pFnFlushEvents     ( nullptr ),
+            _pFn_grid           ( nullptr ),
+            _pFn_set_aspect     ( nullptr )
+    { }
+
     
-    // default initialization with plot label, some data and format
-    template<typename Numeric>
-    Plot( const std::string& name , const std::vector<Numeric>& x , const std::vector<Numeric>& y , const std::string& format = "" )
+
+    Plot( const Plot& ) = delete;
+    Plot& operator=( const Plot& ) = delete;
+
+    Plot( Plot&& other )
+        :   _plot_figure        ( other._plot_figure        ) ,
+            _plot_figure_canvas ( other._plot_figure_canvas ),
+            _pFnDrawidle        ( other._pFnDrawidle        ),
+            _plot_Axes          ( other._plot_Axes          ),
+            _pFnFlushEvents     ( other._pFnFlushEvents     ),
+            _pFn_grid           ( other._pFn_grid           ),
+            _pFn_set_aspect     ( other._pFn_set_aspect     ),
+            _figureName( std::move( other._figureName ) ) ,
+            _childAxises(std::move(other._childAxises))
+    {
+        other._plot_figure        = nullptr;
+        other._plot_figure_canvas = nullptr;
+        other._pFnDrawidle        = nullptr;
+        other._plot_Axes          = nullptr;
+        other._pFnFlushEvents     = nullptr;
+        other._pFn_grid           = nullptr;
+        other._pFn_set_aspect     = nullptr;
+    }
+
+    Plot& operator=( Plot&& other )
+    {
+        std::swap( _plot_figure        , other._plot_figure        );
+        std::swap( _plot_figure_canvas , other._plot_figure_canvas );
+        std::swap( _pFnDrawidle        , other._pFnDrawidle        );
+        std::swap( _plot_Axes          , other._plot_Axes          );
+        std::swap( _pFnFlushEvents     , other._pFnFlushEvents     );
+        std::swap( _pFn_grid           , other._pFn_grid           );
+        std::swap( _pFn_set_aspect , other._pFn_set_aspect );
+        std::swap( _figureName , other._figureName );
+        std::swap( _childAxises , other._childAxises );
+        return *this;
+    }
+
+    Plot( const std::string& name , bool createAnonymousSubplot = false , const std::string firstSubplotName = {} )
         : _figureName(name)
     {
         detail::_interpreter::get( );
 
-        assert(x.size() == y.size());
+        
 
         PyObject* kwargs = PyDict_New();
         if(name != "")
             PyDict_SetItemString(kwargs, "label", PyString_FromString(name.c_str()));
 
-        PyObject* xarray = detail::get_array(x);
-        PyObject* yarray = detail::get_array(y);
+        
+        
 
-        PyObject* pystring = PyString_FromString(format.c_str());
+        
 
-        PyObject* plot_args = PyTuple_New(3);
-        PyTuple_SetItem(plot_args, 0, xarray);
-        PyTuple_SetItem(plot_args, 1, yarray);
-        PyTuple_SetItem(plot_args, 2, pystring);
+        
 
         //PyObject* res = PyObject_Call(detail::_interpreter::get().s_python_function_figure , plot_args, kwargs);
         //[[maybe_unused]]
@@ -3178,7 +3221,7 @@ public:
         Py_DECREF(args);
         
         Py_DECREF( kwargs );
-        Py_DECREF( plot_args );
+        
         bool succeded = false;
         PyObject* paxis_fn = nullptr;
         PyObject* subplotArgs = nullptr;
@@ -3206,12 +3249,28 @@ public:
             ASSERT_MPLCPP( (_pFnFlushEvents = PyObject_GetAttrString( _plot_figure_canvas , "flush_events" )) != nullptr );
             ASSERT_MPLCPP( ( _pFn_grid = PyObject_GetAttrString( _plot_Axes , "grid" ) ) != nullptr );
             ASSERT_MPLCPP( ( _pFn_set_aspect = PyObject_GetAttrString( _plot_Axes , "set_aspect" ) ) != nullptr );
-            _childAxises.insert( {
+            if (firstSubplotName.empty( ))
+            {
+                if (createAnonymousSubplot)
+                {
+                    _childAxises.insert( {
                                     name,
                                     SubAxis(    name ,
-                                                CreateLinePlot( name+ "_subplot"  )
+                                                CreateLinePlot( name  )
                                             )
                                 } );
+                }
+            }
+            else
+            {
+                _childAxises.insert( {
+                    firstSubplotName,
+                    SubAxis(    firstSubplotName ,
+                                CreateLinePlot( firstSubplotName  )
+                            )
+                } );
+            }
+
 
         }
         succeded = true;
@@ -3219,8 +3278,7 @@ public:
 
     // shorter initialization with name or format only
     // basically calls line, = plot([], [])
-    Plot(const std::string& name = "", const std::string& format = "")
-        : Plot(name, std::vector<double>(), std::vector<double>(), format) {}
+
 
 
     void draw()
@@ -3361,11 +3419,21 @@ public:
 
     void aspect (double aspect )
     {
-
+        PyObject* args = PyTuple_New( 1 );
+        PyTuple_SetItem( args , 0 , PyFloat_FromDouble(aspect));
+        auto res = PyObject_CallObject(_pFn_set_aspect,args );
+        internal::Py_DECREF_m( args , res );
     }
+
     void grid   ( LineStyle ls )
     {
-        
+        //_pFn_grid
+        PyObject* args = PyTuple_New( 1 );
+        auto it = LineStyle2PythonMap.find( ls );
+        ASSERT_MPLCPP( it != LineStyle2PythonMap.end( ) );
+        PyTuple_SetItem( args , 0 , PyString_FromString( it->second.c_str( ) ) );
+        auto res = PyObject_CallObject(_pFn_grid,args );
+        internal::Py_DECREF_m( args , res );
     }
 
     template<typename ChronoType , typename Per>
