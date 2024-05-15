@@ -3122,6 +3122,43 @@ public:
         }
         decref();
     }
+
+    void set_color( unsigned int color )
+    {
+        PyObject* color_tuple = PyTuple_New( 3 );
+        PyTuple_SetItem( color_tuple , 0 , PyFloat_FromDouble( ( ( color & 0x00ff0000 ) >> 16   ) / 255.0 ) );
+        PyTuple_SetItem( color_tuple , 1 , PyFloat_FromDouble( ( ( color & 0x0000ff00 ) >> 8    ) / 255.0 ) );
+        PyTuple_SetItem( color_tuple , 2 , PyFloat_FromDouble( ( ( color & 0xff ) ) / 255.0 ) );
+        PyObject* args = PyTuple_New( 1 );
+        PyTuple_SetItem( args , 0 , color_tuple );
+        auto* pfnColor = PyObject_GetAttrString( _line , "set_color" );
+        ASSERT_MPLCPP( ( pfnColor = PyObject_GetAttrString( _line , "set_color" ) ) != nullptr );
+        auto* res = PyObject_CallObject( pfnColor , args );
+        internal::Py_DECREF_m( res , pfnColor , args );
+    }
+
+    void set_linestyle( LineStyle ls )
+    {
+        PyObject* args = PyTuple_New( 1 );
+        auto it = LineStyle2PythonMap.find( ls );
+        ASSERT_MPLCPP( it != LineStyle2PythonMap.end( ) );
+        PyTuple_SetItem( args , 0 , PyString_FromString( it->second.c_str( ) ) );
+        auto* pfnLS = PyObject_GetAttrString( _line , "set_linestyle" );
+        auto res = PyObject_CallObject( pfnLS , args );
+        internal::Py_DECREF_m( args , res ,pfnLS);
+    }
+
+    void set_marker(MarkerStyle ms)
+    {
+        PyObject* args = PyTuple_New( 1 );
+        auto it = MarkerStyle2PythonMap.find( ms );
+        ASSERT_MPLCPP( it != MarkerStyle2PythonMap.end( ) );
+        PyTuple_SetItem( args , 0 , PyString_FromString( it->second.c_str( ) ) );
+        auto* pfnMS = PyObject_GetAttrString( _line , "set_marker" );
+        auto res = PyObject_CallObject( pfnMS , args );
+        internal::Py_DECREF_m( args , res ,pfnMS);
+    }
+
 private:
     void decref( )
     {
@@ -3506,6 +3543,7 @@ private:
         PyTuple_SetItem(plot_args, 1, yarray);
         //PyTuple_SetItem( plot_args , 2 , pystring );
         PyObject* pLine = PyObject_Call( detail::_interpreter::get( ).s_python_Line2d_ctor , plot_args , nullptr );// PyInstanceMethod_New()
+        ASSERT_MPLCPP( pLine != nullptr );
         //auto* paxis_fn = PyObject_GetAttrString( _plot_Axes , "plot" ); add_line
         auto* paxis_fn = PyObject_GetAttrString( _plot_Axes , "add_line" );
         ASSERT_MPLCPP( paxis_fn != nullptr );
